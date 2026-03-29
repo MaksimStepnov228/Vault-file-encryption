@@ -1,3 +1,5 @@
+# Vault file Encryption
+
 Vault is a lightweight, modern encryption utility designed to keep your sensitive files private using AES-256-GCM.
 
 <img width="350" height="250" alt="изображение" src="https://github.com/user-attachments/assets/d71c558a-0141-4d2f-9e03-b2aa258b203a" />
