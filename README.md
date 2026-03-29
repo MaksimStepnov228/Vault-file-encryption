@@ -17,7 +17,7 @@ Decrypt: Select your .vault file, enter the original passphrase, and click "Decr
 _If you would like to rename your files, please do so before encrypting them._
 
 ```
-_Language: Python 3.10_
-_Library: Tkinter / Cryptography_
-_Release Date: 29.03.2026_
+Language: Python 3.10_
+Library: Tkinter / Cryptography_
+Release Date: 29.03.2026_
 ```
