@@ -21,13 +21,16 @@ try:
 except ModuleNotFoundError:
     _LZ4_OK = False
 
+import lzma
+_7Z_OK = True
+
 MAGIC      = b"VAULTVZ1"
 MAGIC_SIZE = 8
 SALT_SIZE  = 32
 NONCE_SIZE = 12
 ITERATIONS = 600_000
 
-ALGORITHMS = ["zlib", "zstd", "lz4"]
+ALGORITHMS = ["zlib", "7z"]
 
 def _derive_key(password: str, salt: bytes) -> bytes:
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
@@ -35,31 +38,31 @@ def _derive_key(password: str, salt: bytes) -> bytes:
     return kdf.derive(password.encode())
 
 def _compress(data: bytes, algorithm: str) -> bytes:
-    if algorithm == "zstd":
-        if not _ZSTD_OK:
-            raise RuntimeError("zstandard not installed — run: pip install zstandard")
-        return zstd.ZstdCompressor(level=9).compress(data)
+    if algorithm == "7z":
+        return lzma.compress(data, format=lzma.FORMAT_XZ, preset=9)
     if algorithm == "lz4":
         if not _LZ4_OK:
-            raise RuntimeError("lz4 not installed — run: pip install lz4")
+            raise RuntimeError("lz4 not installed, run: pip install lz4")
         return _lz4.compress(data, compression_level=_lz4.COMPRESSIONLEVEL_MAX)
     return zlib.compress(data, level=9)
 
 
 def _decompress(data: bytes, algorithm: str) -> bytes:
+    if algorithm == "7z":
+        return lzma.decompress(data, format=lzma.FORMAT_XZ)
     if algorithm == "zstd":
         if not _ZSTD_OK:
-            raise RuntimeError("zstandard not installed — run: pip install zstandard")
+            raise RuntimeError("zstandard not installed, run: pip install zstandard")
         return zstd.ZstdDecompressor().decompress(data)
     if algorithm == "lz4":
         if not _LZ4_OK:
-            raise RuntimeError("lz4 not installed — run: pip install lz4")
+            raise RuntimeError("lz4 not installed, run: pip install lz4")
         return _lz4.decompress(data)
     return zlib.decompress(data)
 
 
 def available_algorithms() -> list[str]:
-    out = ["zlib"]
+    out = ["zlib", "7z"]   # lzma
     if _ZSTD_OK: out.append("zstd")
     if _LZ4_OK:  out.append("lz4")
     return out
@@ -85,13 +88,12 @@ def compress_file(input_path: str, output_path: str,
         meta.update(metadata)
 
     meta_bytes = json.dumps(meta, ensure_ascii=False).encode("utf-8")
-    meta_len   = struct.pack("<I", len(meta_bytes))   # 4-byte LE
+    meta_len   = struct.pack("<I", len(meta_bytes))
 
     p(0.20, f"Compressing with {algorithm}…")
     compressed = _compress(raw, algorithm)
 
     if password:
-        p(0.60, "Deriving key — this takes a moment…")
         salt  = os.urandom(SALT_SIZE)
         nonce = os.urandom(NONCE_SIZE)
         key   = _derive_key(password, salt)
@@ -117,7 +119,7 @@ def decompress_file(input_path: str, output_dir: str,
         data = f.read()
 
     if data[:MAGIC_SIZE] != MAGIC:
-        raise ValueError("Not a valid .vz file (unrecognised magic bytes).")
+        raise ValueError("Not a valid .vz file.")
 
     offset   = MAGIC_SIZE
     meta_len = struct.unpack_from("<I", data, offset)[0]
@@ -133,8 +135,7 @@ def decompress_file(input_path: str, output_dir: str,
 
     if encrypted:
         if not password:
-            raise ValueError("This archive is encrypted — please enter a password.")
-        p(0.20, "Deriving key — this takes a moment…")
+            raise ValueError("This archive is encrypted;please enter a password.")
         salt  = payload[:SALT_SIZE]
         nonce = payload[SALT_SIZE: SALT_SIZE + NONCE_SIZE]
         ct    = payload[SALT_SIZE + NONCE_SIZE:]
@@ -165,7 +166,6 @@ def decompress_file(input_path: str, output_dir: str,
 
 
 def read_metadata(input_path: str) -> dict:
-
     with open(input_path, "rb") as f:
         header = f.read(MAGIC_SIZE + 4)
     if header[:MAGIC_SIZE] != MAGIC:
