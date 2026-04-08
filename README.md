@@ -2,7 +2,7 @@
 
 WinVFE is a lightweight, modern encryption utility designed to keep your sensitive files private using AES-256-GCM.
 
-Thank you very much to @Kflone5 for help with UI development!!
+Thank you very much to @Kflone5 for help with development!!
 
 <img width="150" height="100" alt="Снимок экрана 2026-04-01 185812" src="https://github.com/user-attachments/assets/fec3f644-752f-436a-a46d-45492652b91c" />
 <img width="150" height="100" alt="Снимок экрана 2026-04-01 185816" src="https://github.com/user-attachments/assets/c7365259-e04f-4388-ad17-9caeb9a29646" />
