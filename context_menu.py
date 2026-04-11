@@ -1,22 +1,18 @@
 import os
 import sys
-import argparse
-
-# Crrently for windows
-
-if sys.platform != "win32":
-    print("Context menu integration is only supported on Windows.")
-    sys.exit(1)
-
+import ctypes
 import winreg
 
-# Right click menu features
+# Script to add WinVFE to windows registry for right click operations.
+# Updated as previosuly was only appearing advances options, now in right click immediately.
+# Version 1.5.2 , Release: 10.04.2026
 
+MENU_TITLE = "WinVFE Operations"
 ENTRIES = [
-    ("Encrypt with WinVFE",    "--encrypt",    0),
-    ("Decrypt with WinVFE",    "--decrypt",    1),
-    ("Compress with WinVFE",   "--compress",   2),
-    ("Decompress with WinVFE", "--decompress", 3),
+    ("Encrypt",    "--encrypt"),
+    ("Decrypt",    "--decrypt"),
+    ("Compress",   "--compress"),
+    ("Decompress", "--decompress"),
 ]
 
 REG_TARGETS = [
@@ -27,55 +23,23 @@ REG_TARGETS = [
 
 HKCR = winreg.HKEY_CLASSES_ROOT
 
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
 
-def _exe_path(given: str | None) -> str:
-    if given:
-        return os.path.abspath(given)
+def run_as_admin():
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, " ".join(sys.argv), None, 0
+    )
 
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(here, "WinVFE.exe")
+def get_exe_path():
+    if getattr(sys, 'frozen', False):
+        return sys.executable
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "WinVFE.exe")
 
-
-def install(exe: str):
-    if not os.path.isfile(exe):
-        sys.exit(1)
-
-    for target in REG_TARGETS:
-        for label, flag, _ in ENTRIES:
-            key_path = rf"{target}\{label}\command"
-            cmd = f'"{exe}" {flag} "%1"'
-            try:
-                with winreg.CreateKeyEx(HKCR, key_path,
-                                        access=winreg.KEY_SET_VALUE) as k:
-                    winreg.SetValueEx(k, "", 0, winreg.REG_SZ, cmd)
-                icon_key = rf"{target}\{label}"
-                with winreg.OpenKey(HKCR, icon_key,
-                                    access=winreg.KEY_SET_VALUE) as k:
-                    winreg.SetValueEx(k, "Icon", 0, winreg.REG_SZ, exe)
-
-            except PermissionError:
-                sys.exit(1)
-
-
-
-def uninstall():
-    for target in REG_TARGETS:
-        for label, _, _ in ENTRIES:
-            key_path = rf"{target}\{label}"
-            try:
-                _delete_key_tree(HKCR, key_path)
-                print(f"  [-] {target}\\{label}")
-            except FileNotFoundError:
-                pass  # already gone
-            except PermissionError:
-                print(f"  [!] Permission denied — re-run as Administrator")
-                sys.exit(1)
-
-    print("\nUninstalled. WinVFE entries removed from context menu.")
-
-
-def _delete_key_tree(hive, path: str):
-    """Delete a registry key and all its subkeys (winreg has no recursive delete)."""
+def _delete_key_tree(hive, path):
     try:
         with winreg.OpenKey(hive, path, access=winreg.KEY_ALL_ACCESS) as key:
             while True:
@@ -85,31 +49,42 @@ def _delete_key_tree(hive, path: str):
                 except OSError:
                     break
         winreg.DeleteKey(hive, path)
-    except FileNotFoundError:
+    except:
         pass
 
+def install():
+    exe = get_exe_path()
+    for target in REG_TARGETS:
+        _delete_key_tree(HKCR, rf"{target}\WinVFE")
 
-# ── CLI ────────────────────────────────────────────────────────────────────────
+    for target in REG_TARGETS:
+        parent_path = rf"{target}\WinVFE"
+        try:
+            with winreg.CreateKeyEx(HKCR, parent_path, access=winreg.KEY_ALL_ACCESS) as p_key:
+                winreg.SetValueEx(p_key, "MUIVerb", 0, winreg.REG_SZ, MENU_TITLE)
+                winreg.SetValueEx(p_key, "Icon", 0, winreg.REG_SZ, exe)
+                winreg.SetValueEx(p_key, "SubCommands", 0, winreg.REG_SZ, "")
+                winreg.SetValueEx(p_key, "Position", 0, winreg.REG_SZ, "Top")
+
+            for label, flag in ENTRIES:
+                sub_path = rf"{parent_path}\shell\{label}"
+                cmd_path = rf"{sub_path}\command"
+                with winreg.CreateKeyEx(HKCR, sub_path, access=winreg.KEY_ALL_ACCESS) as s_key:
+                    winreg.SetValueEx(s_key, "MUIVerb", 0, winreg.REG_SZ, label)
+                arg = "%V" if "Background" in target else "%1"
+                cmd = f'"{exe}" {flag} "{arg}"'
+                with winreg.CreateKeyEx(HKCR, cmd_path, access=winreg.KEY_ALL_ACCESS) as c_key:
+                    winreg.SetValueEx(c_key, "", 0, winreg.REG_SZ, cmd)
+        except:
+            continue
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Install or remove WinVFE right-click menu entries.")
-    sub = parser.add_subparsers(dest="command")
-
-    inst = sub.add_parser("install", help="Add context menu entries")
-    inst.add_argument("--exe", default=None,
-                      help="Full path to WinVFE.exe (default: next to this script)")
-
-    sub.add_parser("uninstall", help="Remove context menu entries")
-
-    args = parser.parse_args()
-
-    if args.command == "install":
-        install(_exe_path(args.exe))
-    elif args.command == "uninstall":
-        uninstall()
-    else:
-        parser.print_help()
-
+    if sys.platform != "win32":
+        sys.exit()
+    if not is_admin():
+        run_as_admin()
+        sys.exit()
+    install()
 
 if __name__ == "__main__":
     main()
