@@ -18,52 +18,37 @@ _10.04.2026_
 
 Other versions:
 
+```
 WinVFE 1.5.1 - 06.04.2026
 WinVFE 1.1.5 Patch - 03.04.2026
 WinVFE 1.1.0 - 01.04.2026
 WinVFE 1.0.0 - 26.03.2026
-
-### New features
-WinVFE (Vault) 1.5.2
-10.04.2026
-
-Fixed:
-
-    Algorithm button styling (removed circle and bold-text resizing on click)
-    UI scaling issues (removed scrolling and adjusted fixed window dimensions)
-    General stability when handling large file queues
-
-Removed:
-
-    Legacy Blowfish-CBC encryption support
-    Password strength meter (for improved UI performance and clarity)
-    Manual algorithm selection for Decryption (now handled by auto-detection)
-    Divider lines and subtitles from the Wizard/Start page
-
-Added:
-
-    RAR compression support (requires WinRAR/rar.exe in System PATH)
-    Multi-threaded processing for Encryption, Decryption, and Compression
-    Secure File Shredding (3-pass overwrite before deletion)
-    "Delete archive after decompression" and "Delete .vault after decryption" options
-    Normal vs. Best compression level toggles
-    Result Dialog popups with "Open Folder" shortcut upon completion
-    Footer link buttons for GitHub, Organisation, and Support in the Wizard tab
- 
-Algorithms:
 ```
-# Encryption
 
+# Features
+
+File Encryption:
+
+```
 AES-256-GCM
-Blowfish-CBC
-
-# Compression
-
-zip
-7z
-vz
+ChaCha20-Poly1305
 ```
 
+Data Compression:
+```
+Zip
+Rar
+7z
+```
+
+- Password-based key derivation (PBKDF2, 600k iterations)
+- Smart encrypted File Handling
+- Automatic filename preservation and guard
+- Safe overwrite handling
+- Metadata support for archives
+- Multi thread encryption, decryption, compression, decompresison
+- File shredding (overwrite files to remove any trace of their existance)
+- Efficient handling of large files
 
 Beutiful UI: A clean interface with an easily navigatable and aesthetic UI, includes a wizard.
 
