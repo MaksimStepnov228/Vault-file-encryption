@@ -11,11 +11,17 @@ Thank you very much to @Kflone5 for help with development!!
 <img width="150" height="100" alt="Снимок экрана 2026-04-10 235050" src="https://github.com/user-attachments/assets/40481b4b-422e-4f71-affe-cd1052d56661" />
 
 
-Lates version:
+Latest version:
 
-**WinVFE v1.5.1**
+**WinVFE v1.5.2**
+_10.04.2026_
 
-_06.04.2026_
+Other versions:
+
+WinVFE 1.5.1 - 06.04.2026
+WinVFE 1.1.5 Patch - 03.04.2026
+WinVFE 1.1.0 - 01.04.2026
+WinVFE 1.0.0 - 26.03.2026
 
 ### New features
 WinVFE (Vault) 1.5.2
