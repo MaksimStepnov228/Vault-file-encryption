@@ -5,7 +5,7 @@ import threading, os, io, json, zipfile, tempfile, sys, subprocess
 from datetime import datetime
 import urllib.request
 
-APP_VERSION = "v1.5.1"
+APP_VERSION = "v1.5.2"
 _GH_API = "https://api.github.com/repos/anonimwindows228/Vault-file-encryption/releases/latest"
 _GH_RELEASES = "https://github.com/anonimwindows228/Vault-file-encryption/releases/latest"
 
@@ -26,6 +26,12 @@ def _check_for_update(callback):
     threading.Thread(target=_run, daemon=True).start()
 
 from crypto import encrypt_file, decrypt_file, safe_output_path, LARGE_FILE_THRESHOLD
+
+try:
+    import zxcvbn as _zxcvbn
+    _ZXCVBN_OK = True
+except ImportError:
+    _ZXCVBN_OK = False
 from compress import compress_file, decompress_file, available_algorithms, read_metadata
 from compress import ALGORITHMS as COMP_ALGORITHMS
 
@@ -62,8 +68,23 @@ def append_history(entry: dict):
     except Exception:
         pass
 
-# Colours
 
+def _shred_file(path: str):
+    try:
+        size = os.path.getsize(path)
+        if size > 0:
+            for _ in range(3):
+                with open(path, "r+b") as f:
+                    f.write(os.urandom(size))
+                    f.flush()
+                    os.fsync(f.fileno())
+        os.unlink(path)
+    except OSError:
+        pass
+
+# Colours
+ACCENT_10 = "#000000"
+OTHER     = "#ae30c2"
 BG        = "#10182a"
 BG_BOT    = "#10182a"
 SURFACE2  = "#1a2744"
@@ -108,11 +129,13 @@ def lerp3(c1, c2, c3, t):
 
 def draw_v3(cv, x0, y0, x1, y1, c1, c2, c3):
     h = y1-y0
-    for i in range(h): cv.create_line(x0,y0+i,x1,y0+i,fill=lerp3(c1,c2,c3,i/h))
+    step = max(1, h // 16)
+    for i in range(0, h, step): cv.create_rectangle(x0,y0+i,x1,y0+i+step,fill=lerp3(c1,c2,c3,i/h),outline="")
 
 def draw_hg(cv, x0, y0, x1, y1, c1, c2):
     w = x1-x0
-    for i in range(w): cv.create_line(x0+i,y0,x0+i,y1,fill=lerp_color(c1,c2,i/w))
+    step = max(1, w // 32)
+    for i in range(0, w, step): cv.create_rectangle(x0+i,y0,x0+i+step,y1,fill=lerp_color(c1,c2,i/w),outline="")
 
 def mkframe(parent, bg=BG, **kw):
     return tk.Frame(parent, bg=bg, **kw)
@@ -259,6 +282,42 @@ class ProgressDialog(tk.Toplevel):
     def close(self):
         self.grab_release()
         self.destroy()
+
+
+class ResultDialog(tk.Toplevel):
+    """Popup shown after an operation completes successfully or with error."""
+    def __init__(self, parent, success: bool, title: str, message: str, output_path: str = ""):
+        super().__init__(parent)
+        self.title(title)
+        self.resizable(False, False)
+        self.configure(bg=BG)
+        self.grab_set()
+
+        parent.update_idletasks()
+        px, py = parent.winfo_rootx(), parent.winfo_rooty()
+        pw, ph = parent.winfo_width(), parent.winfo_height()
+        w, h = 380, 148
+        self.geometry(f"{w}x{h}+{px+(pw-w)//2}+{py+(ph-h)//2}")
+
+        body = tk.Frame(self, bg=BG, padx=18, pady=14)
+        body.pack(fill="both", expand=True)
+
+        icon  = "✔" if success else "✖"
+        color = SUCCESS if success else DANGER
+        hdr = mkframe(body); hdr.pack(fill="x", pady=(0, 6))
+        mklabel(hdr, text=icon, color=color, font=("Tahoma", 13, "bold")).pack(side="left", padx=(0, 8))
+        mklabel(hdr, text=title, color=color, font=FONT_BOLD).pack(side="left")
+
+        mklabel(body, text=message, color=TEXT, font=FONT_SM).pack(anchor="w")
+
+        btn_row = mkframe(body); btn_row.pack(fill="x", pady=(12, 0))
+        if success and output_path:
+            GradientButton(btn_row, "Open Folder", lambda: (open_folder(output_path), self.destroy()),
+                           width=96, height=22).pack(side="left")
+        tk.Button(btn_row, text="Close", bg=SURFACE2, fg=MUTED, font=FONT_SM,
+                  relief="flat", bd=0, cursor="hand2", padx=10,
+                  activebackground=SURFACE3, activeforeground=TEXT,
+                  command=self.destroy).pack(side="left", padx=(8, 0))
 
 class DropZone(tk.Frame):
 
@@ -428,13 +487,13 @@ class DropZone(tk.Frame):
         self._chip_frame.pack(fill="x")
 
 def _make_pw_row(parent, pw_var, label="Password:"):
-    mklabel(parent, text=label, color=MUTED, font=FONT_SM).pack(anchor="w", pady=(0,2))
+    mklabel(parent, text=label, color=MUTED, font=FONT_SM).pack(anchor="w", pady=(0, 2))
     row = mkframe(parent); row.pack(fill="x")
     entry = NavyEntry(row, pw_var, show="*", width=24)
     entry.pack(side="left", ipady=3)
     show_btn = tk.Button(row, text="Show", bg=BG, fg=MUTED2, font=FONT_SM,
                          relief="flat", bd=0, cursor="hand2", padx=6)
-    show_btn.pack(side="left", padx=(6,0))
+    show_btn.pack(side="left", padx=(6, 0))
     _show = [False]
     def toggle():
         _show[0] = not _show[0]
@@ -500,36 +559,33 @@ class _AlgoSelector(tk.Frame):
             cv.create_rectangle(0,0,w-1,h-1, fill="", outline=lerp_color(BORDER_HI,c2,0.4))
         else:
             cv.create_rectangle(0,0,w-1,h-1, fill=SURFACE2, outline=BORDER)
-        if hasattr(self, "_show_dot") and self._show_dot:
-            cv.create_oval(5,6,13,14, fill=c2 if sel else MUTED2, outline="")
-            if sel: cv.create_oval(8,9,10,11, fill=WHITE, outline="")
-            cv.create_text(18,h//2, text=algo,
-                           fill=WHITE if sel else MUTED,
-                           font=FONT_BOLD if sel else FONT_SM, anchor="w")
-        else:
-            cv.create_text(w//2,h//2, text=algo,
-                           fill=WHITE if sel else MUTED,
-                           font=FONT_BOLD if sel else FONT_SM, anchor="center")
+        cv.create_text(w//2,h//2, text=algo,
+                       fill=WHITE if sel else MUTED,
+                       font=FONT_SM, anchor="center")
 
 
 class AlgoSelector(_AlgoSelector):
-    _ENC = ["AES-256-GCM", "Blowfish-CBC"]
-    _COL = {"AES-256-GCM": (ACCENT_A, ACCENT_B), "Blowfish-CBC": ("#6a30b0","#b060ff")}
-    _HNT = {"AES-256-GCM": "128-bit blocks, 256-bit key",
-             "Blowfish-CBC": "64-bit blocks, 128-bit key"}
+    _ENC = ["AES-256-GCM", "ChaCha20-Poly1305"]
+    _COL = {"AES-256-GCM":       (ACCENT_A, ACCENT_B),
+            "ChaCha20-Poly1305": (ACCENT_A, ACCENT_B)}
+    _HNT = {"AES-256-GCM":       "256-bit key, Industry standard.",
+            "ChaCha20-Poly1305": "256-bit key, fast on any CPU."}
     def __init__(self, parent, variable, **kw):
         super().__init__(parent, variable, self._ENC, self._COL, self._HNT,
-                         label="Algorithm:", btn_w=138, **kw)
-        self._show_dot = True
+                         label="Algorithm:", btn_w=154, **kw)
+        self._show_dot = False
 
 
 class CompAlgoSelector(_AlgoSelector):
-    _COL = {"zip": (ACCENT_A, ACCENT_B), "7z": ("#1a6030","#30c060")}
+    _COL = {"zip": (ACCENT_A, ACCENT_B),
+            "7z":  (ACCENT_A, ACCENT_B),
+            "rar": (ACCENT_A, ACCENT_B)}
     _HNT = {"zip": "Standard ZIP archive, widely compatible",
-             "7z":  "High compression ratio via LZMA/XZ"}
+             "7z":  "High compression ratio via LZMA/XZ",
+             "rar": "RAR archive via WinRAR (must be installed)"}
     def __init__(self, parent, variable, **kw):
         super().__init__(parent, variable, COMP_ALGORITHMS, self._COL, self._HNT,
-                         label="Compression:", btn_w=80,
+                         label="Compression:", btn_w=74,
                          available=available_algorithms(), **kw)
         self._show_dot = False
 
@@ -546,50 +602,13 @@ class BasePanel(tk.Frame):
         self._bb_inner = tk.Frame(self._bottom_bar, bg=BG)
         self._bb_inner.pack(fill="x", padx=16, pady=(6, 10))
 
-        self._vsb = tk.Scrollbar(self, orient="vertical",
-                                 bg=SURFACE2, troughcolor=INSET,
-                                 width=8, relief="flat", bd=0)
-        self._canvas = tk.Canvas(self, bd=0, highlightthickness=0, bg=BG)
-        self._canvas.configure(yscrollcommand=self._vsb.set)
-        self._vsb.configure(command=self._canvas.yview)
-        self._vsb.pack(side="right", fill="y"); self._vsb.pack_forget()
-        self._canvas.pack(side="left", fill="both", expand=True)
-
-        self._inner  = tk.Frame(self._canvas, bg=BG, padx=16, pady=10)
-        self._win_id = self._canvas.create_window((0, 0), window=self._inner, anchor="nw")
-        self._inner.bind("<Configure>",  self._on_inner_change)
-        self._canvas.bind("<Configure>", self._on_canvas_change)
-        self._canvas.bind("<Enter>", lambda e: self._canvas.focus_set())
-        self.bind_all("<MouseWheel>", self._on_mousewheel)
+        self._inner = tk.Frame(self, bg=BG, padx=16, pady=10)
+        self._inner.pack(fill="both", expand=True)
 
         self._dropzone = DropZone(self._inner, on_file_cb=self._set_path,
                                   mode=drop_mode, multi=multi,
                                   on_clear_cb=self._on_clear)
         self._dropzone.pack(fill="x")
-
-# Scroll
-
-    def _on_inner_change(self, event=None):
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-        self._update_scrollbar()
-
-    def _on_canvas_change(self, event=None):
-        w = event.width if event else self._canvas.winfo_width()
-        self._canvas.itemconfig(self._win_id, width=w)
-        self._update_scrollbar()
-
-    def _update_scrollbar(self):
-        self.update_idletasks()
-        if self._inner.winfo_reqheight() > self._canvas.winfo_height():
-            self._vsb.pack(side="right", fill="y", before=self._canvas)
-        else:
-            self._vsb.pack_forget()
-
-    def _on_mousewheel(self, event):
-        x, y = event.x_root, event.y_root
-        px, py = self.winfo_rootx(), self.winfo_rooty()
-        if px <= x <= px+self.winfo_width() and py <= y <= py+self.winfo_height():
-            self._canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
     def _build_action_row(self, label, command):
         row = tk.Frame(self._bb_inner, bg=BG)
@@ -649,17 +668,18 @@ class BasePanel(tk.Frame):
         self.after(0, lambda: fn(*args, **kwargs))
 
     def _finish_success(self, output_path: str, label: str):
-
         self._last_output = output_path
         def _do():
-            self._result_lbl.config(text=label, fg=SUCCESS)
-            self._folder_btn.pack(side="left", padx=(8, 0))
+            self._result_lbl.config(text="")
+            self._folder_btn.pack_forget()
+            ResultDialog(self.winfo_toplevel(), True, "Done", label, output_path)
         self._ui(_do)
 
     def _finish_error(self, msg: str):
         def _do():
-            self._result_lbl.config(text=msg, fg=DANGER)
+            self._result_lbl.config(text="")
             self._folder_btn.pack_forget()
+            ResultDialog(self.winfo_toplevel(), False, "Error", msg)
         self._ui(_do)
 
 # Encrypt / Decrypt
@@ -669,11 +689,51 @@ class VaultPanel(BasePanel):
         is_enc = (mode == "enc")
         super().__init__(parent, drop_mode="vault" if not is_enc else "any", multi=is_enc)
         self.mode = mode
-        self.pw_var   = tk.StringVar()
-        self.algo_var = tk.StringVar(value="AES-256-GCM")
+        self.pw_var        = tk.StringVar()
+        self.algo_var      = tk.StringVar(value="AES-256-GCM")
+        self.delete_var    = tk.BooleanVar(value=False)
+        self.shred_var     = tk.BooleanVar(value=False)
+        self.multithread_var = tk.BooleanVar(value=True)
 
-        AlgoSelector(self._inner, self.algo_var).pack(fill="x")
+        if is_enc:
+            AlgoSelector(self._inner, self.algo_var).pack(fill="x")
+
         _make_pw_row(self._inner, self.pw_var)
+
+        if is_enc:
+            row = mkframe(self._inner); row.pack(anchor="w", pady=(6, 0))
+            tk.Checkbutton(row, variable=self.delete_var,
+                           bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                           activeforeground=ACCENT_C, font=FONT,
+                           highlightthickness=0, bd=0,
+                           text="Delete original files after encryption").pack(side="left")
+            shred_row = mkframe(self._inner); shred_row.pack(anchor="w", pady=(2, 0))
+            tk.Checkbutton(shred_row, variable=self.shred_var,
+                           bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                           activeforeground=ACCENT_C, font=FONT,
+                           highlightthickness=0, bd=0,
+                           text="Shred originals (Must select delete, overwrite before delete)").pack(side="left")
+        else:
+            row = mkframe(self._inner); row.pack(anchor="w", pady=(6, 0))
+            tk.Checkbutton(row, variable=self.delete_var,
+                           bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                           activeforeground=ACCENT_C, font=FONT,
+                           highlightthickness=0, bd=0,
+                           text="Delete .vault file after decryption").pack(side="left")
+            shred_row = mkframe(self._inner); shred_row.pack(anchor="w", pady=(2, 0))
+            tk.Checkbutton(shred_row, variable=self.shred_var,
+                           bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                           activeforeground=ACCENT_C, font=FONT,
+                           highlightthickness=0, bd=0,
+                           text="Shred vault (Must select delete, overwrite before delete)").pack(side="left")
+
+        mt_row = mkframe(self._inner); mt_row.pack(anchor="w", pady=(4, 0))
+        tk.Checkbutton(mt_row, variable=self.multithread_var,
+                       bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                       activeforeground=ACCENT_C, font=FONT,
+                       highlightthickness=0, bd=0,
+                       text="Multi-threaded processing").pack(side="left")
+
         self._build_action_row(
             "Encrypt File(s)" if is_enc else "Decrypt File",
             self._on_action)
@@ -689,39 +749,62 @@ class VaultPanel(BasePanel):
 
     def _run(self):
         try:
+            import concurrent.futures
             algo    = self.algo_var.get()
             paths   = self.full_paths
             out_dir = os.path.dirname(paths[0]) or "."
+            use_mt  = self.multithread_var.get()
 
             if self.mode == "enc":
                 ts  = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                out = safe_output_path(os.path.join(out_dir, f"{ts}.vault"))
+
                 if len(paths) > 1:
-                    arc_name = f"archive_{ts}.zip"
-                    tmp_arc  = os.path.join(tempfile.gettempdir(), arc_name)
-                    try:
-                        self._progress_cb(0.05, "Creating archive…")
-                        with zipfile.ZipFile(tmp_arc, "w", zipfile.ZIP_DEFLATED,
-                                             compresslevel=9) as zf:
-                            for i, p in enumerate(paths):
-                                self._progress_cb(0.05 + 0.50 * i / len(paths),
-                                                  f"Adding {os.path.basename(p)}…")
-                                zf.write(p, os.path.basename(p))
-                        self._progress_cb(0.55, "Encrypting…")
-                        encrypt_file(tmp_arc, out, self.pw_var.get(),
-                                     progress=lambda v, m: self._progress_cb(0.55 + v*0.45, m),
-                                     algorithm=algo)
-                    finally:
-                        try:
-                            if os.path.exists(tmp_arc): os.unlink(tmp_arc)
-                        except OSError: pass
-                    tag  = f"[{algo}] " if algo != "AES-256-GCM" else ""
-                    label = f"{tag}→ {os.path.basename(out)}  ({len(paths)} files)"
-                    append_history({"ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                    "original_name": arc_name, "vault_name": os.path.basename(out),
-                                    "vault_path": out, "vault_size": os.path.getsize(out),
-                                    "algorithm": algo})
+                    results = []
+                    errors  = []
+                    lock    = threading.Lock()
+                    total   = len(paths)
+
+                    def _enc_one(idx_path):
+                        idx, p = idx_path
+                        out = safe_output_path(
+                            os.path.join(out_dir,
+                                         f"{os.path.splitext(os.path.basename(p))[0]}_{ts}.vault"))
+                        def _prg(v, m=""):
+                            self._progress_cb((idx + v) / total,
+                                              f"[{idx+1}/{total}] {m}")
+                        encrypt_file(p, out, self.pw_var.get(),
+                                     progress=_prg, algorithm=algo)
+                        src = os.path.getsize(p)
+                        dst = os.path.getsize(out)
+                        with lock:
+                            results.append((p, out, src, dst))
+                            append_history({"ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            "original_name": os.path.basename(p),
+                                            "original_size": src, "vault_name": os.path.basename(out),
+                                            "vault_path": out, "vault_size": dst, "algorithm": algo})
+                        return out
+
+                    workers = min(4, total) if use_mt else 1
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+                        futs = [ex.submit(_enc_one, (i, p)) for i, p in enumerate(paths)]
+                        for f in concurrent.futures.as_completed(futs):
+                            f.result()  # re-raise any exception
+
+                    if self.delete_var.get():
+                        for p in paths:
+                            if self.shred_var.get():
+                                _shred_file(p)
+                            else:
+                                try: os.unlink(p)
+                                except OSError: pass
+
+                    last_out = results[-1][1] if results else out_dir
+                    tag = f"[{algo}] " if algo != "AES-256-GCM" else ""
+                    label = f"{tag}→ {len(results)} vault(s) created"
+                    self._ui(self._close_progress)
+                    self._finish_success(last_out, label)
                 else:
+                    out = safe_output_path(os.path.join(out_dir, f"{ts}.vault"))
                     src_size = os.path.getsize(paths[0])
                     encrypt_file(paths[0], out, self.pw_var.get(),
                                  progress=self._progress_cb, algorithm=algo)
@@ -732,14 +815,26 @@ class VaultPanel(BasePanel):
                                     "original_name": os.path.basename(paths[0]),
                                     "original_size": src_size, "vault_name": os.path.basename(out),
                                     "vault_path": out, "vault_size": dst_size, "algorithm": algo})
-                self._ui(self._close_progress)
-                self._finish_success(out, label)
+                    if self.delete_var.get():
+                        if self.shred_var.get():
+                            _shred_file(paths[0])
+                        else:
+                            try: os.unlink(paths[0])
+                            except OSError: pass
+                    self._ui(self._close_progress)
+                    self._finish_success(out, label)
             else:
                 src_size = os.path.getsize(paths[0])
                 out = decrypt_file(paths[0], out_dir, self.pw_var.get(),
-                                   progress=self._progress_cb, algorithm=algo)
+                                   progress=self._progress_cb)
                 dst_size = os.path.getsize(out)
                 label = f"→ {os.path.basename(out)}  ({_size_delta(src_size, dst_size)})"
+                if self.delete_var.get():
+                    if self.shred_var.get():
+                        _shred_file(paths[0])
+                    else:
+                        try: os.unlink(paths[0])
+                        except OSError: pass
                 self._ui(self._close_progress)
                 self._finish_success(out, label)
         except Exception as exc:
@@ -749,20 +844,71 @@ class VaultPanel(BasePanel):
 class CompressPanel(BasePanel):
     def __init__(self, parent, app):
         super().__init__(parent, multi=True)
-        self.pw_var   = tk.StringVar()
-        self.algo_var = tk.StringVar(value=available_algorithms()[0])
+        self.pw_var          = tk.StringVar()
+        self.algo_var        = tk.StringVar(value=available_algorithms()[0])
+        self.best_var        = tk.BooleanVar(value=True)
+        self.delete_var      = tk.BooleanVar(value=False)
+        self.shred_var       = tk.BooleanVar(value=False)
+        self.multithread_var = tk.BooleanVar(value=True)
 
         CompAlgoSelector(self._inner, self.algo_var).pack(fill="x")
+
+        # Compression level row (checkboxes — mutually exclusive via toggle logic)
+        lv_row = mkframe(self._inner); lv_row.pack(anchor="w", pady=(6, 0))
+        mklabel(lv_row, text="Level:", color=MUTED, font=FONT_SM).pack(side="left")
+        self._best_cb = tk.Checkbutton(lv_row, variable=self.best_var, text="Best",
+                           bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                           activeforeground=ACCENT_C, font=FONT,
+                           highlightthickness=0, bd=0,
+                           command=lambda: self.best_var.set(True) or self._sync_level())
+        self._best_cb.pack(side="left", padx=(8, 0))
+        self._norm_var = tk.BooleanVar(value=False)
+        self._norm_cb = tk.Checkbutton(lv_row, variable=self._norm_var, text="Normal",
+                           bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                           activeforeground=ACCENT_C, font=FONT,
+                           highlightthickness=0, bd=0,
+                           command=self._on_normal_toggle)
+        self._norm_cb.pack(side="left", padx=(8, 0))
 
         self._pw_frame = mkframe(self._inner); self._pw_frame.pack(fill="x")
         _make_pw_row(self._pw_frame, self.pw_var, "ZIP Password (optional):")
         self.algo_var.trace_add("write", self._on_algo_change)
 
+        # Delete originals checkbox
+        del_row = mkframe(self._inner); del_row.pack(anchor="w", pady=(6, 0))
+        tk.Checkbutton(del_row, variable=self.delete_var,
+                       bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                       activeforeground=ACCENT_C, font=FONT,
+                       highlightthickness=0, bd=0,
+                       text="Delete original files after compression").pack(side="left")
+        shred_row = mkframe(self._inner); shred_row.pack(anchor="w", pady=(2, 0))
+        tk.Checkbutton(shred_row, variable=self.shred_var,
+                       bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                       activeforeground=ACCENT_C, font=FONT,
+                       highlightthickness=0, bd=0,
+                       text="Shred originals (Must select delete, overwrite before delete)").pack(side="left")
+
+        mt_row = mkframe(self._inner); mt_row.pack(anchor="w", pady=(4, 0))
+        tk.Checkbutton(mt_row, variable=self.multithread_var,
+                       bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                       activeforeground=ACCENT_C, font=FONT,
+                       highlightthickness=0, bd=0,
+                       text="Multi-threaded processing").pack(side="left")
+
         self._build_action_row("Compress File(s)", self._on_action)
         self._on_algo_change()
 
-    def _on_algo_change(self, *_):
+    def _sync_level(self):
+        """Best=True means Normal=False."""
+        self._norm_var.set(not self.best_var.get())
 
+    def _on_normal_toggle(self):
+        self.best_var.set(not self._norm_var.get())
+
+    def _get_level(self):
+        return "best" if self.best_var.get() else "normal"
+
+    def _on_algo_change(self, *_):
         if self.algo_var.get() == "zip":
             self._pw_frame.pack(fill="x")
         else:
@@ -778,70 +924,66 @@ class CompressPanel(BasePanel):
 
     def _run(self):
         try:
+            import concurrent.futures
             paths   = self.full_paths
             out_dir = os.path.dirname(paths[0]) or "."
             algo    = self.algo_var.get()
             pw      = self.pw_var.get()
-            ext     = ".zip" if algo == "zip" else ".7z"
+            level   = self._get_level()
+            use_mt  = self.multithread_var.get()
+            ext     = ".zip" if algo == "zip" else (".rar" if algo == "rar" else ".7z")
 
-            # Measure total input size for delta
             src_size = sum(os.path.getsize(p) for p in paths)
 
             if len(paths) > 1:
-                ts  = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                out = safe_output_path(os.path.join(out_dir, f"archive_{ts}{ext}"))
-                if algo == "zip":
-                    if pw:
-                        try:
-                            import pyzipper
-                            self._progress_cb(0.10, "Creating encrypted ZIP…")
-                            with pyzipper.AESZipFile(out, "w",
-                                                     compression=pyzipper.ZIP_DEFLATED,
-                                                     encryption=pyzipper.WZ_AES) as zf:
-                                zf.setpassword(pw.encode("utf-8"))
-                                for i, p in enumerate(paths):
-                                    self._progress_cb(0.10 + 0.85 * i / len(paths),
-                                                      f"Adding {os.path.basename(p)}…")
-                                    zf.write(p, os.path.basename(p))
-                        except ImportError:
-                            raise RuntimeError(
-                                "AES-encrypted ZIP requires pyzipper.\n"
-                                "Run:  pip install pyzipper")
-                    else:
-                        self._progress_cb(0.10, "Creating ZIP archive…")
-                        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED,
-                                             compresslevel=9) as zf:
-                            for i, p in enumerate(paths):
-                                self._progress_cb(0.10 + 0.85 * i / len(paths),
-                                                  f"Adding {os.path.basename(p)}…")
-                                zf.write(p, os.path.basename(p))
-                    self._progress_cb(1.00, "Done.")
-                else:
-                    tmp_zip = ""
-                    try:
-                        fd, tmp_zip = tempfile.mkstemp(suffix=".zip")
-                        os.close(fd)
-                        with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_STORED) as zf:
-                            for p in paths: zf.write(p, os.path.basename(p))
-                        compress_file(tmp_zip, out, algorithm=algo,
-                                      progress=self._progress_cb)
-                    finally:
-                        try:
-                            if tmp_zip and os.path.exists(tmp_zip): os.unlink(tmp_zip)
-                        except OSError: pass
+                # Parallel: one archive per file
+                results = []
+                errors  = []
+                lock    = threading.Lock()
+                total   = len(paths)
 
-                dst_size = os.path.getsize(out)
-                label = f"→ {os.path.basename(out)}  ({len(paths)} files, {_size_delta(src_size, dst_size)})"
+                def _comp_one(idx_path):
+                    idx, p = idx_path
+                    stem = os.path.splitext(os.path.basename(p))[0]
+                    out  = safe_output_path(os.path.join(out_dir, f"{stem}{ext}"))
+                    def _prg(v, m=""):
+                        self._progress_cb((idx + v) / total,
+                                          f"[{idx+1}/{total}] {m}")
+                    compress_file(p, out, algorithm=algo, password=pw,
+                                  progress=_prg, level=level)
+                    with lock:
+                        results.append((p, out))
+                    return out
+
+                workers = min(4, total) if use_mt else 1
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+                    futs = [ex.submit(_comp_one, (i, p)) for i, p in enumerate(paths)]
+                    for f in concurrent.futures.as_completed(futs):
+                        f.result()
+
+                dst_size = sum(os.path.getsize(r[1]) for r in results)
+                label = f"→ {len(results)} archive(s)  ({_size_delta(src_size, dst_size)})"
+                last_out = results[-1][1] if results else out_dir
+
             else:
                 stem = os.path.splitext(os.path.basename(paths[0]))[0]
                 out  = safe_output_path(os.path.join(out_dir, f"{stem}{ext}"))
                 compress_file(paths[0], out, algorithm=algo,
-                              password=pw, progress=self._progress_cb)
+                              password=pw, progress=self._progress_cb, level=level)
                 dst_size = os.path.getsize(out)
                 label = f"→ {os.path.basename(out)}  ({_size_delta(src_size, dst_size)})"
+                last_out = out
+
+            if self.delete_var.get():
+                for p in paths:
+                    if self.shred_var.get():
+                        _shred_file(p)
+                    else:
+                        try: os.unlink(p)
+                        except OSError: pass
 
             self._ui(self._close_progress)
-            self._finish_success(out, label)
+            self._finish_success(last_out, label)
         except Exception as exc:
             self._ui(self._close_progress)
             self._finish_error(str(exc))
@@ -851,8 +993,11 @@ class CompressPanel(BasePanel):
 class DecompressPanel(BasePanel):
     def __init__(self, parent, app):
         super().__init__(parent, drop_mode="vz")
-        self.pw_var         = tk.StringVar()
-        self.to_folder_var  = tk.BooleanVar(value=False)
+        self.pw_var              = tk.StringVar()
+        self.to_folder_var       = tk.BooleanVar(value=False)
+        self.delete_archive_var  = tk.BooleanVar(value=False)
+        self.shred_archive_var   = tk.BooleanVar(value=False)
+        self.multithread_var     = tk.BooleanVar(value=True)
 
         self._meta_lbl = mklabel(self._inner, text="", color=MUTED, font=FONT_SM)
         self._meta_lbl.pack(anchor="w")
@@ -867,6 +1012,26 @@ class DecompressPanel(BasePanel):
                        text="Decompress into folder").pack(side="left")
         mklabel(row, text="  (creates <name>/ next to archive)",
                 color=MUTED, font=FONT_SM).pack(side="left")
+
+        del_row = mkframe(self._inner); del_row.pack(anchor="w", pady=(6, 0))
+        tk.Checkbutton(del_row, variable=self.delete_archive_var,
+                       bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                       activeforeground=ACCENT_C, font=FONT,
+                       highlightthickness=0, bd=0,
+                       text="Delete archive after decompression").pack(side="left")
+        shred_row = mkframe(self._inner); shred_row.pack(anchor="w", pady=(2, 0))
+        tk.Checkbutton(shred_row, variable=self.shred_archive_var,
+                       bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                       activeforeground=ACCENT_C, font=FONT,
+                       highlightthickness=0, bd=0,
+                       text="Shred archive (Must select delete, overwrite before delete").pack(side="left")
+
+        mt_row = mkframe(self._inner); mt_row.pack(anchor="w", pady=(4, 0))
+        tk.Checkbutton(mt_row, variable=self.multithread_var,
+                       bg=BG, fg=TEXT, selectcolor=INSET, activebackground=BG,
+                       activeforeground=ACCENT_C, font=FONT,
+                       highlightthickness=0, bd=0,
+                       text="Multi-threaded processing").pack(side="left")
 
         self._build_action_row("Decompress File", self._on_action)
 
@@ -908,6 +1073,12 @@ class DecompressPanel(BasePanel):
                                      progress=self._progress_cb)
             dst_size = os.path.getsize(out)
             label = f"→ {os.path.relpath(out, archive_dir)}  ({_size_delta(src_size, dst_size)})"
+            if self.delete_archive_var.get():
+                if self.shred_archive_var.get():
+                    _shred_file(self.full_path)
+                else:
+                    try: os.unlink(self.full_path)
+                    except OSError: pass
             self._ui(self._close_progress)
             self._finish_success(out, label)
         except Exception as exc:
@@ -923,27 +1094,39 @@ class WizardPanel(tk.Frame):
         body.pack(fill="both", expand=True)
 
         mklabel(body, text="WinVFE (Vault)", font=FONT_TITLE, color=ACCENT_C).pack(anchor="w")
-        mklabel(body,
-                text="A local file encryption and compression utility.\n"
-                     "All processing happens on your machine, nothing leaves your disk.",
-                color=TEXT, font=FONT_SM).pack(anchor="w", pady=(4, 10))
-
-        thin_divider(body, pady=6)
 
         rows = [
-            ("Encryption",      "AES-256-GCM; Blowfish-CBC"),
-            ("Compression",     "ZIP (AES password), 7z / LZMA"),
-            ("Built with",      "Python 3.11; Tkinter"),
-            ("Version",         f"{APP_VERSION}  (06.04.2026)"),
-            ("GitHub",          "github.com/anonimwindows228/Vault-file-encryption"),
-            ("Website",          "https://github.com/ltrsoc"),
-            ("Donate",          "donationalerts.com/r/ltrsociety"),
-            ("Contact",         "maximstepnov@proton.me"),
+            ("Encryption",  "AES-256-GCM, ChaCha20-Poly1305"),
+            ("Compression", "ZIP (AES password), 7z / LZMA, RAR (WinRAR)"),
+            ("Built with",  "Python 3.11 + Tkinter"),
+            ("Version",     f"{APP_VERSION}  (06.04.2026)"),
+            ("Contact",     "maximstepnov@proton.me"),
         ]
         for label, value in rows:
             row = mkframe(body); row.pack(anchor="w", fill="x", pady=2)
             mklabel(row, text=f"{label}:", color=MUTED, font=FONT_SM, width=13).pack(side="left")
             mklabel(row, text=value,       color=TEXT,  font=FONT_SM).pack(side="left")
+
+        # Bottom link buttons
+        import webbrowser
+        btn_frame = mkframe(body)
+        btn_frame.pack(side="bottom", anchor="w", pady=(18, 0))
+
+        def _link_btn(parent, text, url):
+            b = tk.Button(parent, text=text, bg=OTHER, fg=ACCENT_10,
+                          font=FONT_SM, relief="flat", bd=0, cursor="hand2",
+                          padx=10, pady=5,
+                          highlightthickness=1, highlightbackground=BORDER_HI,
+                          activebackground=ACCENT_A, activeforeground=WHITE,
+                          command=lambda: webbrowser.open(url))
+            b.pack(side="left", padx=(0, 8))
+
+        _link_btn(btn_frame, "⭐ GitHub",
+                  "https://github.com/MaksimStepnov228/Vault-file-encryption/tree/main")
+        _link_btn(btn_frame, "🌐 Organisation",
+                  "https://ltrsoc.github.io/")
+        _link_btn(btn_frame, "❤ Support Us",
+                  "https://donationalerts.com/r/trsociety")
 
 
 # App shell
@@ -958,7 +1141,7 @@ class VaultApp(_AppBase):
                  startup_file: str | None = None):
         super().__init__()
         self.title(f"WinVFE {APP_VERSION}")
-        self.geometry("520x420")
+        self.geometry("500x440")
         self.resizable(False, False)
         self.configure(bg=BG)
 
