@@ -4,11 +4,12 @@ WinVFE is a lightweight, modern encryption utility designed to keep your sensiti
 
 Thank you very much to @Kflone5 for help with development!!
 
-<img width="150" height="100" alt="Снимок экрана 2026-04-01 185812" src="https://github.com/user-attachments/assets/fec3f644-752f-436a-a46d-45492652b91c" />
-<img width="150" height="100" alt="Снимок экрана 2026-04-01 185816" src="https://github.com/user-attachments/assets/c7365259-e04f-4388-ad17-9caeb9a29646" />
-<img width="150" height="100" alt="Снимок экрана 2026-04-01 185822" src="https://github.com/user-attachments/assets/6ae54d2b-c98a-48d4-991c-539a520a5fd6" />
-<img width="150" height="100" alt="Снимок экрана 2026-04-01 185827" src="https://github.com/user-attachments/assets/e2516577-63ea-4ef3-bf2a-a4a080946870" />
-<img width="150" height="100" alt="Снимок экрана 2026-04-01 185833" src="https://github.com/user-attachments/assets/7533e9b1-756e-4e40-9b17-60f781e72913" />
+<img width="150" height="100" alt="Снимок экрана 2026-04-10 235136" src="https://github.com/user-attachments/assets/07280b3d-0764-4abb-a914-8a7987525b5d" />
+<img width="150" height="100" alt="Снимок экрана 2026-04-10 235129" src="https://github.com/user-attachments/assets/875781bb-137f-4a53-8b0a-2b17fbab2a96" />
+<img width="150" height="100" alt="Снимок экрана 2026-04-10 235112" src="https://github.com/user-attachments/assets/9a6d386d-254e-4c77-a5e9-8f44a1b64cc1" />
+<img width="150" height="100" alt="Снимок экрана 2026-04-10 235102" src="https://github.com/user-attachments/assets/1451b839-0a78-48e9-a98f-0b9b6af7d837" />
+<img width="150" height="100" alt="Снимок экрана 2026-04-10 235050" src="https://github.com/user-attachments/assets/40481b4b-422e-4f71-affe-cd1052d56661" />
+
 
 Lates version:
 
